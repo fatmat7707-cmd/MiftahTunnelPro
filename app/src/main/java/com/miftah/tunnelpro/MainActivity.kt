@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var profile: TextView
     private lateinit var connectButton: Button
     private lateinit var scanButton: Button
+    private lateinit var shareButton: Button
     private var selectedConfig: Config? = null
     private var tunnelName = "MiftahTunnel"
     private var backend: GoBackend? = null
@@ -67,7 +68,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.4.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.5.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -83,6 +84,8 @@ class MainActivity : Activity() {
         col.addView(scanButton, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("حفظ الحالة الحالية للمقارنة") { saveBaseline() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("مقارنة الحالة الحالية بالحالة المحفوظة") { compareWithBaseline() }, lp(-1, -2, 0, 0, 0, 8))
+        shareButton = button("مشاركة تقرير التشخيص") { shareDiagnosticReport() }
+        col.addView(shareButton, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -239,6 +242,20 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun shareDiagnosticReport() {
+        val report = details.text?.toString()?.trim().orEmpty()
+        if (report.isBlank()) {
+            Toast.makeText(this, "نفّذ الفحص أولاً لإنشاء تقرير", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.getDefault()).format(Date())
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "تقرير تشخيص الشبكة - " + stamp)
+            putExtra(Intent.EXTRA_TEXT, "Miftah Tunnel Pro 0.5.0\\n" + report + "\\n\\nتقرير تشخيصي فقط؛ لا يثبت وجود ثغرة.")
+        }
+        startActivity(Intent.createChooser(send, "مشاركة تقرير التشخيص"))
+    }
     private fun collectSnapshot(): JSONObject {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = cm.activeNetwork
