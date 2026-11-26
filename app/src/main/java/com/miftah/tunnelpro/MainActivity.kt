@@ -436,7 +436,7 @@ class MainActivity : Activity() {
         for (i in 0 until history.length()) {
             val item = history.getJSONObject(i)
             val values = listOf("time","wifi","validated","captive","gateway","dns","addresses","https").map { item.optString(it) }
-            csv.append(values.joinToString(",") { "\\"" + it.replace("\\"", "\\"\\"") + "\\"" }).append("\\n")
+csv.append(values.joinToString(",") { value -> "\"" + value.replace("\"", "\"\"") + "\"" }).append('\n')
         }
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
