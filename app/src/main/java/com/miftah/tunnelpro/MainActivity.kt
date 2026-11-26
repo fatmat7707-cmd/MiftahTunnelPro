@@ -5,6 +5,8 @@ import android.net.VpnService
 import android.os.Bundle
 import android.content.Intent
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -68,7 +70,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.6.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.7.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -88,6 +90,8 @@ class MainActivity : Activity() {
         col.addView(shareButton, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("عرض سجل الفحوصات السابقة") { showDiagnosticHistory() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("مسح سجل الفحوصات") { clearDiagnosticHistory() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("نسخ التقرير الحالي") { copyCurrentReport() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("تصدير سجل الفحوصات CSV") { exportHistoryCsv() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -244,6 +248,31 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun copyCurrentReport() {
+        val report = details.text?.toString()?.trim().orEmpty()
+        if (report.isBlank()) { Toast.makeText(this, "لا يوجد تقرير لنسخه", Toast.LENGTH_SHORT).show(); return }
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("تقرير تشخيص الشبكة", report))
+        Toast.makeText(this, "تم نسخ التقرير", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun exportHistoryCsv() {
+        val raw = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]"
+        val history = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+        if (history.length() == 0) { Toast.makeText(this, "لا يوجد سجل لتصديره", Toast.LENGTH_SHORT).show(); return }
+        val csv = StringBuilder("time,wifi,validated,captive,gateway,dns,addresses,https\\n")
+        for (i in 0 until history.length()) {
+            val item = history.getJSONObject(i)
+            val values = listOf("time","wifi","validated","captive","gateway","dns","addresses","https").map { item.optString(it) }
+            csv.append(values.joinToString(",") { "\\"" + it.replace("\\"", "\\"\\"") + "\\"" }).append("\\n")
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_SUBJECT, "سجل فحوصات Miftah Tunnel Pro")
+            putExtra(Intent.EXTRA_TEXT, csv.toString())
+        }
+        startActivity(Intent.createChooser(send, "تصدير سجل الفحوصات"))
+    }
     private fun appendDiagnosticHistory(snapshot: JSONObject) {
         val prefs = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE)
         val history = try { org.json.JSONArray(prefs.getString("history", "[]")) } catch (e: Exception) { org.json.JSONArray() }
