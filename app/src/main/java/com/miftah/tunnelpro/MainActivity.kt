@@ -303,7 +303,7 @@ class MainActivity : Activity() {
             put("dns", props?.dnsServers?.joinToString(", ") { it.hostAddress ?: "" } ?: "غير متاح")
             put("addresses", props?.linkAddresses?.joinToString(", ") { it.address.hostAddress ?: "" } ?: "غير متاح")
             put("https", checkStandardConnectivity(network))
-        }
+        }.also { appendDiagnosticHistory(it) }
     }
 
     private fun saveBaseline() {
