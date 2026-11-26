@@ -70,7 +70,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.7.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.8.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -92,6 +92,7 @@ class MainActivity : Activity() {
         col.addView(button("مسح سجل الفحوصات") { clearDiagnosticHistory() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("نسخ التقرير الحالي") { copyCurrentReport() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("تصدير سجل الفحوصات CSV") { exportHistoryCsv() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("تنقيب وتحليل بيانات الشبكة") { analyzeNetworkData() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -246,6 +247,62 @@ class MainActivity : Activity() {
                 scanButton.text = "إعادة تحليل الشبكة والبوابة"
             }
         }
+    }
+
+
+    private fun analyzeNetworkData() {
+        val raw = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]"
+        val history = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+        if (history.length() == 0) {
+            details.text = "لا توجد بيانات كافية للتحليل. نفّذ فحص الشبكة أو احفظ حالة مرجعية أولاً."
+            return
+        }
+        val total = history.length()
+        var wifiCount = 0
+        var validatedCount = 0
+        var captiveCount = 0
+        var httpsOk = 0
+        val gateways = linkedMapOf<String, Int>()
+        val dnsServers = linkedMapOf<String, Int>()
+        val failures = mutableListOf<String>()
+        for (i in 0 until total) {
+            val item = history.getJSONObject(i)
+            if (item.optBoolean("wifi")) wifiCount++
+            if (item.optBoolean("validated")) validatedCount++
+            if (item.optBoolean("captive")) captiveCount++
+            val https = item.optString("https")
+            if (https.contains("204")) httpsOk++
+            else if (https.isNotBlank()) failures.add(item.optString("time") + ": " + https)
+            val gateway = item.optString("gateway", "غير متاح")
+            gateways[gateway] = (gateways[gateway] ?: 0) + 1
+            item.optString("dns", "").split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach {
+                dnsServers[it] = (dnsServers[it] ?: 0) + 1
+            }
+        }
+        val first = history.getJSONObject(0)
+        val last = history.getJSONObject(total - 1)
+        val changes = listOf("gateway", "dns", "addresses").count { first.optString(it) != last.optString(it) }
+        val pct: (Int) -> Int = { count -> (count * 100) / total }
+        val out = StringBuilder()
+        out.append("تحليل بيانات الشبكة المحفوظة\\n")
+        out.append("عدد العينات: ").append(total).append(" (آخر 50 عينة كحد أقصى)\\n")
+        out.append("الفترة: ").append(first.optString("time")).append(" — ").append(last.optString("time")).append("\\n\\n")
+        out.append("مؤشرات الاتصال\\n")
+        out.append("عينات Wi-Fi: ").append(wifiCount).append("/").append(total).append(" (").append(pct(wifiCount)).append("%)\\n")
+        out.append("عينات الإنترنت المتحقق: ").append(validatedCount).append("/").append(total).append(" (").append(pct(validatedCount)).append("%)\\n")
+        out.append("عينات رصد بوابة دخول: ").append(captiveCount).append("\\n")
+        out.append("استجابات HTTPS الطبيعية 204: ").append(httpsOk).append("/").append(total).append("\\n")
+        out.append("تغيرت بيانات البوابة/DNS/العنوان بين أول وآخر عينة في ").append(changes).append(" من 3 حقول\\n\\n")
+        out.append("البوابات الأكثر ظهوراً\\n")
+        gateways.entries.sortedByDescending { it.value }.take(5).forEach { out.append(it.key).append(" — ").append(it.value).append(" مرة\\n") }
+        out.append("\\nخوادم DNS المسجلة\\n")
+        if (dnsServers.isEmpty()) out.append("لا توجد بيانات DNS\\n")
+        else dnsServers.entries.sortedByDescending { it.value }.take(8).forEach { out.append(it.key).append(" — ").append(it.value).append(" مرة\\n") }
+        out.append("\\nآخر ملاحظات فشل HTTPS\\n")
+        if (failures.isEmpty()) out.append("لا توجد حالات فشل مسجلة\\n")
+        else failures.takeLast(5).forEach { out.append(it).append("\\n") }
+        out.append("\\nالتحليل يعتمد فقط على سجلات هذا الهاتف التي جمعها التطبيق. لا يمسح أجهزة الآخرين ولا يجمع كلمات مرور أو حركة مرور خاصة، ولا يثبت وجود ثغرة.")
+        details.text = out.toString()
     }
 
     private fun copyCurrentReport() {
