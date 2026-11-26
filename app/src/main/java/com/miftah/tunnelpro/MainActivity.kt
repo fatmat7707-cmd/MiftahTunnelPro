@@ -1,6 +1,10 @@
 package com.miftah.tunnelpro
 
 import android.app.Activity
+import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.net.VpnService
 import android.os.Bundle
 import android.content.Intent
@@ -38,6 +42,9 @@ class MainActivity : Activity() {
     private var selectedConfig: Config? = null
     private var tunnelName = "MiftahTunnel"
     private var backend: GoBackend? = null
+    private val timerHandler = Handler(Looper.getMainLooper())
+    private var timerEndElapsed: Long = 0L
+    private var timerRunnable: Runnable? = null
 
     private val tunnel = object : Tunnel {
         override fun getName(): String = tunnelName
@@ -70,7 +77,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.8.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.9.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -93,6 +100,7 @@ class MainActivity : Activity() {
         col.addView(button("نسخ التقرير الحالي") { copyCurrentReport() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("تصدير سجل الفحوصات CSV") { exportHistoryCsv() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("تنقيب وتحليل بيانات الشبكة") { analyzeNetworkData() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("⏱️ مؤقت مدة الاشتراك") { configureSessionTimer() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -249,6 +257,58 @@ class MainActivity : Activity() {
         }
     }
 
+
+
+    private fun configureSessionTimer() {
+        val input = EditText(this).apply {
+            hint = "مثلاً: 120"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("مؤقت مدة الاشتراك")
+            .setMessage("أدخل عدد الدقائق المسموح بها في اشتراكك حسب بيانات البطاقة أو صفحة الحساب. هذا مؤقت محلي للتذكير ولا يغيّر وقت الشبكة أو صلاحياتها.")
+            .setView(input)
+            .setPositiveButton("بدء المؤقت") { _, _ ->
+                val minutes = input.text.toString().toLongOrNull()
+                if (minutes == null || minutes !in 1..10080) {
+                    Toast.makeText(this, "أدخل مدة بين دقيقة و7 أيام", Toast.LENGTH_LONG).show()
+                } else startSessionTimer(minutes * 60_000L)
+            }
+            .setNegativeButton("إلغاء", null)
+            .setNeutralButton("إيقاف المؤقت") { _, _ -> stopSessionTimer() }
+            .show()
+    }
+
+    private fun startSessionTimer(durationMs: Long) {
+        timerRunnable?.let { timerHandler.removeCallbacks(it) }
+        timerEndElapsed = SystemClock.elapsedRealtime() + durationMs
+        val tick = object : Runnable {
+            override fun run() {
+                val remaining = (timerEndElapsed - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                val totalSeconds = remaining / 1000L
+                val hours = totalSeconds / 3600
+                val minutes = (totalSeconds % 3600) / 60
+                val seconds = totalSeconds % 60
+                details.text = "⏱️ مؤقت مدة الاشتراك\\n\\nالوقت المتبقي حسب المدة التي أدخلتها: %02d:%02d:%02d".format(hours, minutes, seconds) +
+                    "\\n\\nهذا عدّاد محلي فقط. لا يقرأ رصيد الشبكة ولا يمدد الجلسة ولا يغيّر إعدادات الراوتر."
+                if (remaining == 0L) {
+                    Toast.makeText(this@MainActivity, "انتهى المؤقت الذي ضبطته", Toast.LENGTH_LONG).show()
+                    timerRunnable = null
+                } else timerHandler.postDelayed(this, 1000L)
+            }
+        }
+        timerRunnable = tick
+        timerHandler.post(tick)
+        Toast.makeText(this, "بدأ مؤقت التذكير", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopSessionTimer() {
+        timerRunnable?.let { timerHandler.removeCallbacks(it) }
+        timerRunnable = null
+        timerEndElapsed = 0L
+        details.text = "تم إيقاف مؤقت مدة الاشتراك."
+    }
 
     private fun analyzeNetworkData() {
         val raw = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]"
@@ -448,6 +508,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        timerRunnable?.let { timerHandler.removeCallbacks(it) }
         executor.shutdown()
     }
 
