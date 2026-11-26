@@ -17,6 +17,10 @@ import com.wireguard.config.Config
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : Activity() {
     private val bg = Color.rgb(11, 20, 34)
@@ -77,6 +81,8 @@ class MainActivity : Activity() {
         col.addView(button("فحص اتصال الإنترنت") { refreshNetwork() }, lp(-1, -2, 0, 0, 0, 8))
         scanButton = button("تحليل الشبكة والبوابة") { runNetworkAssessment() }
         col.addView(scanButton, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("حفظ الحالة الحالية للمقارنة") { saveBaseline() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("مقارنة الحالة الحالية بالحالة المحفوظة") { compareWithBaseline() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -229,6 +235,55 @@ class MainActivity : Activity() {
                 details.text = report
                 scanButton.isEnabled = true
                 scanButton.text = "إعادة تحليل الشبكة والبوابة"
+            }
+        }
+    }
+
+    private fun collectSnapshot(): JSONObject {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(network)
+        val props = cm.getLinkProperties(network)
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        return JSONObject().apply {
+            put("time", stamp)
+            put("wifi", caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true)
+            put("validated", caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+            put("captive", caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true)
+            put("gateway", props?.routes?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress ?: "غير متاح")
+            put("dns", props?.dnsServers?.joinToString(", ") { it.hostAddress ?: "" } ?: "غير متاح")
+            put("addresses", props?.linkAddresses?.joinToString(", ") { it.address.hostAddress ?: "" } ?: "غير متاح")
+            put("https", checkStandardConnectivity(network))
+        }
+    }
+
+    private fun saveBaseline() {
+        details.text = "جارٍ حفظ الحالة المرجعية..."
+        executor.execute {
+            val snap = try { collectSnapshot() } catch (e: Exception) { null }
+            runOnUiThread {
+                if (snap == null) details.text = "تعذر حفظ الحالة الحالية." else {
+                    getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).edit().putString("baseline", snap.toString()).apply()
+                    details.text = "تم حفظ الحالة المرجعية.\\n\\n" + snap.toString(2) + "\\n\\nبعد انتهاء جلسة الاختبار المصرح بها، اضغط زر المقارنة."
+                }
+            }
+        }
+    }
+
+    private fun compareWithBaseline() {
+        val saved = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).getString("baseline", null)
+        if (saved == null) { details.text = "لا توجد حالة مرجعية. احفظ الحالة الحالية أولاً."; return }
+        details.text = "جارٍ جمع الحالة الحالية ومقارنتها..."
+        executor.execute {
+            val current = try { collectSnapshot() } catch (e: Exception) { null }
+            runOnUiThread {
+                if (current == null) { details.text = "تعذر جمع الحالة الحالية."; return@runOnUiThread }
+                val base = JSONObject(saved)
+                val keys = listOf("wifi", "validated", "captive", "gateway", "dns", "addresses", "https")
+                val labels = listOf("Wi-Fi", "تحقق Android من الإنترنت", "رصد بوابة الدخول", "البوابة", "DNS", "عناوين الجهاز", "اختبار HTTPS")
+                val changes = keys.indices.filter { base.optString(keys[it]) != current.optString(keys[it]) }
+                val result = if (changes.isEmpty()) "لم يتغير أي مؤشر مسجل." else changes.joinToString("\\n\\n") { i -> labels[i] + "\\nقبل: " + base.optString(keys[i]) + "\\nالآن: " + current.optString(keys[i]) }
+                details.text = "نتيجة المقارنة\\nالحالة المرجعية: " + base.optString("time") + "\\nالحالة الحالية: " + current.optString("time") + "\\n\\n" + result + "\\n\\nالمقارنة تشخيصية فقط؛ لا تثبت وجود ثغرة ولا تحاول تجاوز تسجيل الدخول أو الدفع."
             }
         }
     }
