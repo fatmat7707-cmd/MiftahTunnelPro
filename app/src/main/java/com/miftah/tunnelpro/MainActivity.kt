@@ -68,7 +68,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.5.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.6.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -86,6 +86,8 @@ class MainActivity : Activity() {
         col.addView(button("مقارنة الحالة الحالية بالحالة المحفوظة") { compareWithBaseline() }, lp(-1, -2, 0, 0, 0, 8))
         shareButton = button("مشاركة تقرير التشخيص") { shareDiagnosticReport() }
         col.addView(shareButton, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("عرض سجل الفحوصات السابقة") { showDiagnosticHistory() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("مسح سجل الفحوصات") { clearDiagnosticHistory() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -242,6 +244,36 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun appendDiagnosticHistory(snapshot: JSONObject) {
+        val prefs = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE)
+        val history = try { org.json.JSONArray(prefs.getString("history", "[]")) } catch (e: Exception) { org.json.JSONArray() }
+        history.put(snapshot)
+        val trimmed = org.json.JSONArray()
+        val start = (history.length() - 50).coerceAtLeast(0)
+        for (i in start until history.length()) trimmed.put(history.getJSONObject(i))
+        prefs.edit().putString("history", trimmed.toString()).apply()
+    }
+
+    private fun showDiagnosticHistory() {
+        val raw = getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).getString("history", "[]") ?: "[]"
+        val history = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+        if (history.length() == 0) { details.text = "لا توجد فحوصات محفوظة بعد."; return }
+        val out = StringBuilder("سجل الفحوصات المحفوظة — الأحدث أولاً\\n\\n")
+        for (i in history.length() - 1 downTo 0) {
+            val item = history.getJSONObject(i)
+            out.append("#").append(i + 1).append("  ").append(item.optString("time")).append("\\n")
+            out.append("Wi-Fi: ").append(if (item.optBoolean("wifi")) "متصل" else "غير متصل")
+            out.append(" | الإنترنت متحقق: ").append(if (item.optBoolean("validated")) "نعم" else "لا").append("\\n")
+            out.append("بوابة: ").append(item.optString("gateway")).append("\\n")
+            out.append("HTTPS: ").append(item.optString("https")).append("\\n\\n")
+        }
+        details.text = out.toString()
+    }
+
+    private fun clearDiagnosticHistory() {
+        getSharedPreferences("network_diagnostics", Context.MODE_PRIVATE).edit().remove("history").apply()
+        details.text = "تم مسح سجل الفحوصات المحفوظ على هذا الجهاز."
+    }
     private fun shareDiagnosticReport() {
         val report = details.text?.toString()?.trim().orEmpty()
         if (report.isBlank()) {
