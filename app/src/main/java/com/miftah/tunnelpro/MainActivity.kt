@@ -14,6 +14,8 @@ import android.view.Gravity
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
@@ -25,9 +27,11 @@ class MainActivity : Activity() {
     private lateinit var details: TextView
     private lateinit var profile: TextView
     private lateinit var connectButton: Button
+    private lateinit var scanButton: Button
     private var selectedConfig: Config? = null
     private var tunnelName = "MiftahTunnel"
     private var backend: GoBackend? = null
+
     private val tunnel = object : Tunnel {
         override fun getName(): String = tunnelName
         override fun onStateChange(newState: Tunnel.State) {
@@ -59,7 +63,7 @@ class MainActivity : Activity() {
             textSize = 25f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 8, 0, 4))
         col.addView(TextView(this).apply {
-            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.2.0"
+            text = "MIFTAH TUNNEL PRO  •  الإصدار 0.4.0"
             textSize = 12f; setTextColor(0xFF9EB2C8.toInt()); gravity = Gravity.CENTER
         }, lp(-1, -2, 0, 0, 0, 22))
 
@@ -70,17 +74,20 @@ class MainActivity : Activity() {
         }
         col.addView(status, lp(-1, -2, 0, 0, 0, 12))
 
-        col.addView(button("استيراد ملف WireGuard (.conf)") { pickConfig() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("فحص اتصال الإنترنت") { refreshNetwork() }, lp(-1, -2, 0, 0, 0, 8))
+        scanButton = button("تحليل الشبكة والبوابة") { runNetworkAssessment() }
+        col.addView(scanButton, lp(-1, -2, 0, 0, 0, 8))
+
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
             textSize = 13f; setTextColor(0xFFB8C9DA.toInt()); setPadding(12, 12, 12, 12); setBackgroundColor(panel)
         }
+        col.addView(button("استيراد ملف WireGuard (.conf)") { pickConfig() }, lp(-1, -2, 0, 12, 0, 8))
         col.addView(profile, lp(-1, -2, 0, 0, 0, 8))
 
         connectButton = button("تشغيل النفق") { toggleTunnel() }
         connectButton.isEnabled = false
         col.addView(connectButton, lp(-1, -2, 0, 0, 0, 8))
-        col.addView(button("فحص اتصال الإنترنت") { refreshNetwork() }, lp(-1, -2, 0, 0, 0, 8))
 
         details = TextView(this).apply {
             textSize = 14f; setTextColor(Color.WHITE); setPadding(16, 16, 16, 16); setBackgroundColor(panel)
@@ -88,7 +95,7 @@ class MainActivity : Activity() {
         col.addView(details, lp(-1, -2, 0, 12, 0, 12))
 
         col.addView(TextView(this).apply {
-            text = "تنبيه: يحتاج النفق إلى ملف WireGuard صالح وخادم تملك حق استخدامه. الـVPN لا يوقف عداد الوقت أو البيانات في Hotspot ولا يتجاوز انتهاء البطاقة. لا تستورد ملفات من مصدر مجهول؛ ملف WireGuard يحتوي مفتاحاً خاصاً."
+            text = "الفحص تشخيصي غير تخريبي: يقرأ معلومات الاتصال والبوابة وDNS ويتحقق من استجابة اختبار اتصال قياسي. لا يخترق كلمة مرور ولا يتجاوز بطاقة أو نظام دفع. ظهور مؤشر غير طبيعي ليس دليلاً وحده على وجود ثغرة.\n\nيحتاج النفق إلى ملف WireGuard صالح وخادم تملك حق استخدامه. لا تستورد ملفات من مصدر مجهول؛ ملف WireGuard يحتوي مفتاحاً خاصاً."
             textSize = 13f; setTextColor(0xFFFFD88A.toInt()); setPadding(14, 14, 14, 14)
             setBackgroundColor(Color.rgb(55, 43, 24))
         }, lp(-1, -2, 0, 8, 0, 0))
@@ -131,7 +138,7 @@ class MainActivity : Activity() {
             profile.text = "تم تحليل ملف WireGuard بنجاح. جاهز للاتصال."
             connectButton.isEnabled = true
             status.text = "الإعداد جاهز — النفق غير متصل"
-            details.text = "ملف الإعداد صالح من ناحية الصياغة.\n\nملاحظة: نجاح التحليل لا يضمن أن الخادم متاح أو أن المفاتيح صحيحة. سيتم اختبار الاتصال عند التشغيل."
+            details.text = "ملف الإعداد صالح من ناحية الصياغة.\n\nنجاح التحليل لا يضمن أن الخادم متاح أو أن المفاتيح صحيحة. سيتم اختبار الاتصال عند التشغيل."
         } catch (e: Exception) {
             selectedConfig = null
             connectButton.isEnabled = false
@@ -140,7 +147,6 @@ class MainActivity : Activity() {
     }
 
     private fun toggleTunnel() {
-        val cfg = selectedConfig ?: return
         val b = backend ?: return
         executor.execute {
             try {
@@ -151,11 +157,7 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     val prepare = VpnService.prepare(this)
-                    if (prepare != null) {
-                        startActivityForResult(prepare, 701)
-                    } else {
-                        startTunnel()
-                    }
+                    if (prepare != null) startActivityForResult(prepare, 701) else startTunnel()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -183,11 +185,75 @@ class MainActivity : Activity() {
 
     private fun refreshNetwork() {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        val network = cm.activeNetwork
+        val caps = cm.getNetworkCapabilities(network)
         val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         val internet = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
         val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-        details.text = "فحص الشبكة\n\nWi-Fi: ${if (wifi) "متصل" else "غير متصل"}\nإمكانية الإنترنت: ${if (internet) "معلنة" else "غير معلنة"}\nتم التحقق من الإنترنت: ${if (validated) "نعم" else "لا"}\n\nيمكن استيراد ملف WireGuard صالح ثم طلب إذن VPN وتشغيل النفق."
+        val captive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
+        details.text = "حالة الاتصال\n\nWi-Fi: ${if (wifi) "متصل" else "غير متصل"}\nإمكانية الإنترنت: ${if (internet) "معلنة" else "غير معلنة"}\nالإنترنت متحقق منه: ${if (validated) "نعم" else "لا"}\nبوابة دخول أسيرة مكتشفة من Android: ${if (captive) "نعم" else "لا"}\n\nاضغط «تحليل الشبكة والبوابة» للحصول على تفاصيل إضافية."
+    }
+
+    private fun runNetworkAssessment() {
+        scanButton.isEnabled = false
+        scanButton.text = "جارٍ تحليل الشبكة..."
+        details.text = "جارٍ جمع معلومات الشبكة وإجراء اختبار اتصال قياسي..."
+        executor.execute {
+            val report = try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val network = cm.activeNetwork
+                val caps = cm.getNetworkCapabilities(network)
+                val props = cm.getLinkProperties(network)
+                val wifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+                val validated = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                val captive = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL) == true
+                val gateway = props?.routes?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress ?: "غير متاح"
+                val dns = props?.dnsServers?.joinToString(", ") { it.hostAddress ?: "" }?.ifBlank { "غير متاح" } ?: "غير متاح"
+                val localAddress = props?.linkAddresses?.joinToString(", ") { it.address.hostAddress ?: "" }?.ifBlank { "غير متاح" } ?: "غير متاح"
+                val probe = checkStandardConnectivity(network)
+                buildString {
+                    append("تقرير تحليل الشبكة\n\n")
+                    append("نوع الاتصال: ${if (wifi) "Wi-Fi" else "ليس Wi-Fi أو غير معروف"}\n")
+                    append("عنوان الجهاز: $localAddress\n")
+                    append("البوابة الافتراضية: $gateway\n")
+                    append("خوادم DNS: $dns\n\n")
+                    append("Android يعتبر الإنترنت متحققاً: ${if (validated) "نعم" else "لا"}\n")
+                    append("Android رصد بوابة دخول: ${if (captive) "نعم" else "لا"}\n")
+                    append("اختبار HTTPS القياسي: $probe\n\n")
+                    append("التفسير: هذه بيانات تشخيصية تساعد على تحديد موضع مشكلة الاتصال أو صفحة الدخول. لا تثبت وجود ثغرة، ولا تختبر تجاوز المصادقة أو الدفع.")
+                }
+            } catch (e: Exception) {
+                "تعذر إكمال التحليل: ${e.message ?: e.javaClass.simpleName}"
+            }
+            runOnUiThread {
+                details.text = report
+                scanButton.isEnabled = true
+                scanButton.text = "إعادة تحليل الشبكة والبوابة"
+            }
+        }
+    }
+
+    private fun checkStandardConnectivity(network: android.net.Network?): String {
+        if (network == null) return "لا توجد شبكة نشطة"
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = network.openConnection(URL("https://connectivitycheck.gstatic.com/generate_204")) as HttpURLConnection
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.instanceFollowRedirects = false
+            connection.requestMethod = "GET"
+            val code = connection.responseCode
+            when {
+                code == 204 -> "استجابة 204 طبيعية"
+                code in 300..399 -> "إعادة توجيه HTTP $code — قد تكون صفحة دخول أو سياسة شبكة"
+                code == 200 -> "استجابة 200 — قد تكون الشبكة تعترض اختبار الاتصال"
+                else -> "استجابة HTTP $code"
+            }
+        } catch (e: Exception) {
+            "تعذر الوصول إلى خادم الاختبار (${e.javaClass.simpleName})"
+        } finally {
+            connection?.disconnect()
+        }
     }
 
     override fun onDestroy() {
