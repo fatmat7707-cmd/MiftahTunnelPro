@@ -101,6 +101,7 @@ class MainActivity : Activity() {
         col.addView(button("تصدير سجل الفحوصات CSV") { exportHistoryCsv() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("تنقيب وتحليل بيانات الشبكة") { analyzeNetworkData() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("⏱️ مؤقت مدة الاشتراك") { configureSessionTimer() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("📶 قياس استقرار الاتصال") { measureConnectionStability() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -258,6 +259,60 @@ class MainActivity : Activity() {
     }
 
 
+
+
+    private fun measureConnectionStability() {
+        details.text = "جارٍ قياس استقرار الاتصال بثلاث محاولات خفيفة..."
+        executor.execute {
+            val samples = mutableListOf<Long>()
+            val outcomes = mutableListOf<String>()
+            val network = (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).activeNetwork
+            repeat(3) { index ->
+                var connection: HttpURLConnection? = null
+                val started = SystemClock.elapsedRealtime()
+                try {
+                    if (network == null) throw IllegalStateException("لا توجد شبكة نشطة")
+                    connection = network.openConnection(URL("https://connectivitycheck.gstatic.com/generate_204")) as HttpURLConnection
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.instanceFollowRedirects = false
+                    connection.requestMethod = "GET"
+                    val code = connection.responseCode
+                    val elapsed = SystemClock.elapsedRealtime() - started
+                    samples.add(elapsed)
+                    outcomes.add("المحاولة ${index + 1}: HTTP ${code} — ${elapsed} ms")
+                } catch (e: Exception) {
+                    val elapsed = SystemClock.elapsedRealtime() - started
+                    outcomes.add("المحاولة ${index + 1}: فشلت بعد ${elapsed} ms (${e.javaClass.simpleName})")
+                } finally {
+                    connection?.disconnect()
+                }
+                if (index < 2) Thread.sleep(700)
+            }
+            val average = if (samples.isEmpty()) null else samples.average().toLong()
+            val minimum = samples.minOrNull()
+            val maximum = samples.maxOrNull()
+            val report = buildString {
+                append("تقرير استقرار الاتصال\\n\\n")
+                append(outcomes.joinToString("\\n"))
+                append("\\n\\nنجاح الاستجابة: ${samples.size}/3")
+                if (average != null) {
+                    append("\\nمتوسط زمن الاستجابة: ${average} ms")
+                    append("\\nأسرع استجابة: ${minimum} ms")
+                    append("\\nأبطأ استجابة: ${maximum} ms")
+                }
+                append("\\n\\nالتقييم: ")
+                append(when {
+                    samples.size < 2 -> "الاتصال غير مستقر أو خادم الاختبار غير متاح"
+                    average!! < 300 -> "استجابة جيدة في هذا الاختبار القصير"
+                    average < 800 -> "استجابة متوسطة"
+                    else -> "استجابة بطيئة"
+                })
+                append("\\n\\nهذا اختبار HTTPS محدود بثلاث محاولات إلى خادم اختبار عام، وليس قياس سرعة تنزيل/رفع أو اختبار ضغط أو مسحاً للشبكة.")
+            }
+            runOnUiThread { details.text = report }
+        }
+    }
 
     private fun configureSessionTimer() {
         val input = EditText(this).apply {
