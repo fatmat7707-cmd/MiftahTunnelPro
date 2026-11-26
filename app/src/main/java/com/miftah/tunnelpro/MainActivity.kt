@@ -21,6 +21,7 @@ import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.URL
 import java.util.concurrent.Executors
 import org.json.JSONObject
@@ -102,6 +103,7 @@ class MainActivity : Activity() {
         col.addView(button("تنقيب وتحليل بيانات الشبكة") { analyzeNetworkData() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("⏱️ مؤقت مدة الاشتراك") { configureSessionTimer() }, lp(-1, -2, 0, 0, 0, 8))
         col.addView(button("📶 قياس استقرار الاتصال") { measureConnectionStability() }, lp(-1, -2, 0, 0, 0, 8))
+        col.addView(button("🧭 فحص DNS وبوابة الدخول") { inspectDnsAndPortal() }, lp(-1, -2, 0, 0, 0, 8))
 
         profile = TextView(this).apply {
             text = "لم يتم اختيار ملف إعداد بعد"
@@ -260,6 +262,53 @@ class MainActivity : Activity() {
 
 
 
+
+
+    private fun inspectDnsAndPortal() {
+        details.text = "جارٍ فحص DNS واستجابة بوابة الدخول..."
+        executor.execute {
+            val report = buildString {
+                append("فحص DNS وبوابة الدخول\\n\\n")
+                listOf("connectivitycheck.gstatic.com", "www.google.com", "cp.cloudflare.com").forEach { host ->
+                    try {
+                        val addresses = InetAddress.getAllByName(host).take(4).joinToString(", ") { it.hostAddress ?: "" }
+                        append("DNS ${host}: ${addresses}\\n")
+                    } catch (e: Exception) {
+                        append("DNS ${host}: تعذر الحل (${e.javaClass.simpleName})\\n")
+                    }
+                }
+                append("\\nاختبارات HTTPS القياسية\\n")
+                listOf(
+                    "Google" to "https://www.google.com/generate_204",
+                    "Cloudflare" to "https://cp.cloudflare.com/generate_204"
+                ).forEach { (label, address) ->
+                    var connection: HttpURLConnection? = null
+                    try {
+                        val network = (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).activeNetwork
+                        if (network == null) throw IllegalStateException("لا توجد شبكة نشطة")
+                        connection = network.openConnection(URL(address)) as HttpURLConnection
+                        connection.connectTimeout = 4000
+                        connection.readTimeout = 4000
+                        connection.instanceFollowRedirects = false
+                        connection.requestMethod = "GET"
+                        val code = connection.responseCode
+                        val redirectHost = connection.getHeaderField("Location")?.let {
+                            try { URL(it).host } catch (_: Exception) { "عنوان إعادة توجيه غير قياسي" }
+                        }
+                        append(label).append(": HTTP ").append(code)
+                        if (redirectHost != null) append(" — إعادة توجيه إلى ").append(redirectHost)
+                        append("\\n")
+                    } catch (e: Exception) {
+                        append(label).append(": تعذر الاختبار (").append(e.javaClass.simpleName).append(")\\n")
+                    } finally {
+                        connection?.disconnect()
+                    }
+                }
+                append("\\nقراءة النتائج: فشل DNS قد يشير إلى مشكلة حل أسماء؛ إعادة التوجيه أو اختلاف النتائج بين الوجهتين قد يشير إلى بوابة دخول أو سياسة شبكة. هذه مؤشرات تشخيصية وليست إثباتاً لثغرة، ولا يحاول الفحص تسجيل الدخول أو تجاوز الدفع.")
+            }
+            runOnUiThread { details.text = report }
+        }
+    }
 
     private fun measureConnectionStability() {
         details.text = "جارٍ قياس استقرار الاتصال بثلاث محاولات خفيفة..."
